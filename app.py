@@ -67,14 +67,17 @@ if protocols_data:
             historical_response = requests.get(historical_url)
             if historical_response.status_code == 200:
                 historical_data = historical_response.json()
-                tvl_data = historical_data['tvl']
-                tvl_df = pd.DataFrame(tvl_data)
-                tvl_df['date'] = pd.to_datetime(tvl_df['date'], unit='s')
-                
-                # Plot historical TVL
-                st.subheader("Historical TVL")
-                fig = px.line(tvl_df, x='date', y='totalLiquidityUSD', title=f"{selected_protocol} Historical TVL")
-                st.plotly_chart(fig)
+                if 'tvl' in historical_data and isinstance(historical_data['tvl'], list):
+                    tvl_data = historical_data['tvl']
+                    tvl_df = pd.DataFrame(tvl_data, columns=['Date', 'TVL'])
+                    tvl_df['Date'] = pd.to_datetime(tvl_df['Date'], unit='s')
+                    
+                    # Plot historical TVL
+                    st.subheader("Historical TVL")
+                    fig = px.line(tvl_df, x='Date', y='TVL', title=f"{selected_protocol} Historical TVL")
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Historical TVL data not available or in unexpected format for this protocol")
             else:
                 st.error("Failed to fetch historical data")
 else:

@@ -1,67 +1,81 @@
 import streamlit as st
 import requests
 import pandas as pd
+import plotly.express as px
 
-# Function to get all protocols
-def get_protocols():
-    response = requests.get("https://api.llama.fi/protocols")
+# Set page title
+st.set_page_config(page_title="DeFi Protocol Comparison")
+
+st.title("DeFi Protocol Comparison Tool")
+
+# Function to fetch data from DeFi Llama API
+def fetch_protocols():
+    url = "https://api.llama.fi/protocols"
+    response = requests.get(url)
     if response.status_code == 200:
         return response.json()
     else:
-        st.error("Failed to load protocols")
-        return []
-
-# Function to get TVL for a protocol
-def get_tvl(protocol_slug):
-    response = requests.get(f"https://api.llama.fi/tvl/{protocol_slug}")
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error(f"Failed to load TVL for {protocol_slug}")
+        st.error("Failed to fetch data from DeFi Llama API")
         return None
 
-# Function to get historical TVL for a protocol
-def get_historical_tvl(protocol_slug):
-    response = requests.get(f"https://api.llama.fi/protocol/{protocol_slug}")
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error(f"Failed to load historical TVL for {protocol_slug}")
-        return []
+# Fetch protocols data
+protocols_data = fetch_protocols()
 
-# Streamlit app
-st.title("DeFi Protocol Comparison")
-
-# Load protocols
-protocols = get_protocols()
-protocol_names = [protocol['name'] for protocol in protocols]
-protocol_slugs = {protocol['name']: protocol['slug'] for protocol in protocols}
-
-# Select protocols to compare
-selected_protocols = st.multiselect("Select protocols to compare", protocol_names)
-
-if selected_protocols:
-    data = []
-    for protocol_name in selected_protocols:
-        protocol_slug = protocol_slugs[protocol_name]
-        tvl_data = get_tvl(protocol_slug)
-        if tvl_data:
-            data.append({
-                "Protocol": protocol_name,
-                "TVL": tvl_data['totalLiquidityUSD']
-            })
-    df = pd.DataFrame(data)
-    st.table(df)
-
-    # Option to show historical data
-    if st.checkbox("Show historical TVL"):
-        for protocol_name in selected_protocols:
-            protocol_slug = protocol_slugs[protocol_name]
-            historical_tvl_data = get_historical_tvl(protocol_slug)
-            if historical_tvl_data:
-                tvl_df = pd.DataFrame(historical_tvl_data['tvl'])
+if protocols_data:
+    # Create a DataFrame from the protocols data
+    df = pd.DataFrame(protocols_data)
+    
+    # Allow users to select protocols
+    selected_protocols = st.multiselect(
+        "Select protocols to compare",
+        options=df['name'].tolist(),
+        default=df['name'].iloc[:5].tolist()  # Default to top 5 protocols
+    )
+    
+    if selected_protocols:
+        # Filter the DataFrame based on selected protocols
+        selected_df = df[df['name'].isin(selected_protocols)]
+        
+        # Display comparison table
+        st.subheader("Protocol Comparison Table")
+        comparison_table = selected_df[['name', 'tvl', 'chain', 'change_1d', 'change_7d', 'change_1m']]
+        st.dataframe(comparison_table)
+        
+        # Create a bar chart of TVL for selected protocols
+        st.subheader("Total Value Locked (TVL) Comparison")
+        fig = px.bar(selected_df, x='name', y='tvl', title="TVL by Protocol")
+        st.plotly_chart(fig)
+        
+        # Allow user to select a protocol for detailed view
+        selected_protocol = st.selectbox("Select a protocol for detailed view", selected_protocols)
+        
+        if selected_protocol:
+            st.subheader(f"Detailed View: {selected_protocol}")
+            protocol_data = selected_df[selected_df['name'] == selected_protocol].iloc[0]
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("TVL", f"${protocol_data['tvl']:,.0f}")
+            col2.metric("24h Change", f"{protocol_data['change_1d']:.2f}%")
+            col3.metric("7d Change", f"{protocol_data['change_7d']:.2f}%")
+            
+            # Display additional information
+            st.write(f"Chain: {protocol_data['chain']}")
+            st.write(f"Description: {protocol_data['description']}")
+            
+            # Fetch historical data for the selected protocol
+            historical_url = f"https://api.llama.fi/protocol/{protocol_data['slug']}"
+            historical_response = requests.get(historical_url)
+            if historical_response.status_code == 200:
+                historical_data = historical_response.json()
+                tvl_data = historical_data['tvl']
+                tvl_df = pd.DataFrame(tvl_data)
                 tvl_df['date'] = pd.to_datetime(tvl_df['date'], unit='s')
-                tvl_df.set_index('date', inplace=True)
-                st.line_chart(tvl_df['totalLiquidityUSD'], width=0, height=400)
-                st.write(f"Historical TVL for {protocol_name}")
-
+                
+                # Plot historical TVL
+                st.subheader("Historical TVL")
+                fig = px.line(tvl_df, x='date', y='totalLiquidityUSD', title=f"{selected_protocol} Historical TVL")
+                st.plotly_chart(fig)
+            else:
+                st.error("Failed to fetch historical data")
+else:
+    st.error("No data available. Please try again later.")
